@@ -1,18 +1,6 @@
 from .agents import create_agents, generate_all_requests, get_agents
 from .scenario_runner import resolve_round
-
-
-def print_requests(reqs):
-    print("\n--- REQUESTS ---")
-    for r in reqs[:10]:
-        print(r)
-    print(f"... total: {len(reqs)}")
-
-
-def print_agent_states(agents):
-    print("\n--- AGENT STATES (first 10) ---")
-    for a in agents[:10]:
-        print(a.get_state())
+from .nswf_interface import send_requests_to_nswf
 
 
 def run_simulation(rounds=3):
@@ -20,18 +8,18 @@ def run_simulation(rounds=3):
     agents = get_agents()
 
     for i in range(rounds):
-        print(f"\n================ ROUND {i+1} ================")
+        print(f"\n=========== ROUND {i+1} ===========")
 
         reqs = generate_all_requests()
-        print_requests(reqs)
+        print("Total requests:", len(reqs))
 
+        # send to NSWF placeholder
+        decisions = send_requests_to_nswf(reqs)
+        print("Sent to NSWF (placeholder)")
+
+        # local resolver (temporary)
         results = resolve_round(reqs, agents)
-
-        print("\nConflicts resolved:")
-        for k in list(results.keys())[:10]:
-            print(k, "→", results[k])
-
-        print_agent_states(agents)
+        print("Sample results:", list(results.items())[:5])
 
 
 if __name__ == "__main__":

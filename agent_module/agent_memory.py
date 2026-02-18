@@ -1,12 +1,11 @@
+# agent_memory.py
+
 class AgentMemory:
     def __init__(self):
         self.history = []
         self.guilt = 0
 
     def record(self, result: str):
-        """
-        result: "win" | "lose" | "neutral"
-        """
         self.history.append(result)
 
         if result == "lose":
