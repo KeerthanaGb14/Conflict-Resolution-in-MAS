@@ -1,68 +1,125 @@
-# agents.py
+import random
 import time
-from .agent_memory import AgentMemory
-from .config import TARGETS, REQUEST_TYPES, VISIBLE_AGENT_COUNT, SIM_AGENT_COUNT
-from .behaviors import choose_behavior, generate_request_for_behavior
+from typing import List, Dict
 
-_all_agents = []
-_last_requests = []
+from langchain_groq import ChatGroq
+from langchain_core.messages import HumanMessage
+
+# =========================
+# REAL LLM (Groq)
+# =========================
+
+import os
+
+llm = ChatGroq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    model="llama3-70b-8192",
+    temperature=0.7
+)
 
 
-class Agent:
+# =========================
+# MEMORY
+# =========================
+class AgentMemory:
     def __init__(self, agent_id: str):
         self.agent_id = agent_id
-        self.memory = AgentMemory()
-        self.behavior = choose_behavior()
-        self.last_target = None
+        self.guilt = 0
+        self.history = []
 
-    def get_timestamp(self):
-        return int(time.time())
+    def update(self, result: str):
+        self.history.append(result)
+        if result == "lose":
+            self.guilt += 1
+        elif result == "win":
+            self.guilt = max(0, self.guilt - 1)
 
-    def generate_request(self):
-        return generate_request_for_behavior(self)
+# =========================
+# AGENT
+# =========================
+class Agent:
+    def __init__(self, agent_id: str, visible=False):
+        self.agent_id = agent_id
+        self.memory = AgentMemory(agent_id)
+        self.visible = visible
 
-    def update_memory(self, result: str):
-        self.memory.record(result)
+    # -------- VISIBLE (LLM) --------
+    def generate_visible_request(self) -> Dict:
+        prompt = f"""
+You are agent {self.agent_id} in a multi-agent system.
 
-    def get_state(self):
+Generate a request in JSON ONLY.
+No explanation text.
+
+Format:
+{{
+ "request_type": "task/resource/api",
+ "target": "API_X or GPU or Task_A",
+ "utility": number between 1 and 10,
+ "urgency": number between 1 and 5
+}}
+"""
+
+        try:
+            response = llm.invoke([HumanMessage(content=prompt)])
+            text = response.content.strip()
+
+            import json
+            parsed = json.loads(text)
+
+        except:
+            parsed = {
+                "request_type": "api",
+                "target": "GPU",
+                "utility": random.uniform(1,10),
+                "urgency": random.randint(1,5),
+            }
+
         return {
             "agent_id": self.agent_id,
-            "guilt": self.memory.guilt,
-            "history": self.memory.history[-5:],
-            "behavior": self.behavior
+            "request_type": parsed["request_type"],
+            "target": parsed["target"],
+            "utility": float(parsed["utility"]),
+            "urgency": int(parsed["urgency"]),
+            "timestamp": int(time.time())
         }
 
+    # -------- SIMULATED --------
+    def generate_random_request(self) -> Dict:
+        targets = ["API_X", "GPU", "Task_A"]
+        types = ["task", "resource", "api"]
 
-def create_agents():
-    global _all_agents
-    _all_agents = []
+        return {
+            "agent_id": self.agent_id,
+            "request_type": random.choice(types),
+            "target": random.choice(targets),
+            "utility": round(random.uniform(1,10), 2),
+            "urgency": random.randint(1,5),
+            "timestamp": int(time.time())
+        }
 
-    for i in range(VISIBLE_AGENT_COUNT):
-        _all_agents.append(Agent(f"A{i+1}"))
+    def generate_request(self) -> Dict:
+        if self.visible:
+            return self.generate_visible_request()
+        else:
+            return self.generate_random_request()
 
-    for i in range(SIM_AGENT_COUNT):
-        _all_agents.append(Agent(f"S{i+1}"))
+    def update_memory(self, result: str):
+        self.memory.update(result)
 
+# =========================
+# CREATE AGENTS
+# =========================
+visible_agents: List[Agent] = [Agent(f"A{i+1}", visible=True) for i in range(5)]
+simulated_agents: List[Agent] = [Agent(f"S{i+1}") for i in range(100)]
 
-def generate_all_requests():
-    global _last_requests
-    _last_requests = []
+all_agents: List[Agent] = visible_agents + simulated_agents
 
-    for agent in _all_agents:
-        _last_requests.append(agent.generate_request())
-
-    return _last_requests
-
-
-def get_agents():
-    return _all_agents
-
-
-def get_all_requests() -> list:
-    """
-    Returns list of request dictionaries
-    Used by other modules
-    """
-    if not _all_agents:
-        create_agents()
-    return generate_all_requests()
+# =========================
+# EXPORT FUNCTION
+# =========================
+def get_all_requests() -> List[Dict]:
+    requests = []
+    for agent in all_agents:
+        requests.append(agent.generate_request())
+    return requests
