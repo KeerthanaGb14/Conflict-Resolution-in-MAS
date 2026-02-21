@@ -2,7 +2,6 @@
 pragma solidity ^0.8.20;
 
 interface IArbitratorRegistry {
-    function getActiveArbitrators() external view returns (address[] memory);
     function isArbitratorActive(address) external view returns (bool);
 }
 
@@ -13,21 +12,17 @@ contract DisputeManager {
     IArbitratorRegistry public registry;
 
     struct Dispute {
-        string disputeCID; 
-        address[] selectedArbitrators;
-        mapping(address => bytes32) submittedResults;
-        mapping(bytes32 => uint256) resultCounts;
+        string disputeCID;
         bytes32 finalResultHash;
         string explanationCID;
         bool finalized;
-        uint256 submissionCount;
+        bool exists;
     }
 
     mapping(uint256 => Dispute) public disputes;
 
     event DisputeCreated(uint256 disputeId, string disputeCID);
-    event ResultSubmitted(uint256 disputeId, address arbitrator, bytes32 resultHash);
-    event DisputeFinalized(uint256 disputeId, bytes32 finalResultHash);
+    event DisputeFinalized(uint256 disputeId, bytes32 resultHash);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not authorized");
@@ -40,87 +35,107 @@ contract DisputeManager {
     }
 
     function createDispute(string memory _disputeCID) external {
-
         disputeCounter++;
-        uint256 disputeId = disputeCounter;
 
-        Dispute storage d = disputes[disputeId];
-        d.disputeCID = _disputeCID;
+        disputes[disputeCounter] = Dispute({
+            disputeCID: _disputeCID,
+            finalResultHash: bytes32(0),
+            explanationCID: "",
+            finalized: false,
+            exists: true
+        });
 
-
-        address[] memory activeArbs = registry.getActiveArbitrators();
-        require(activeArbs.length >= 5, "Not enough arbitrators");
-
-        // Deterministic pseudo-random selection
-        uint256 seed = uint256(keccak256(abi.encodePacked(_disputeCID, disputeId)));
-
-        uint256 count = 0;
-        while (d.selectedArbitrators.length < 5) {
-            uint256 index = seed % activeArbs.length;
-            address candidate = activeArbs[index];
-
-            if (registry.isArbitratorActive(candidate) && !_isAlreadySelected(d.selectedArbitrators, candidate)) {
-                d.selectedArbitrators.push(candidate);
-            }
-
-            seed = uint256(keccak256(abi.encodePacked(seed)));
-            count++;
-            require(count < 100, "Selection failed");
-        }
-
-        emit DisputeCreated(disputeId, _disputeCID);
+        emit DisputeCreated(disputeCounter, _disputeCID);
     }
 
-    function submitResult(uint256 disputeId, bytes32 resultHash) external {
+    function finalizeDispute(
+        uint256 disputeId,
+        bytes32 resultHash,
+        bytes[] memory signatures
+    ) external {
 
         Dispute storage d = disputes[disputeId];
+
+        require(d.exists, "Dispute does not exist");
         require(!d.finalized, "Already finalized");
-        require(_isSelectedArbitrator(d.selectedArbitrators, msg.sender), "Not selected");
+        require(signatures.length >= 3, "Need at least 3 signatures");
 
-        require(d.submittedResults[msg.sender] == bytes32(0), "Already submitted");
+        bytes32 message = keccak256(
+            abi.encodePacked(
+                block.chainid,
+                address(this),
+                disputeId,
+                resultHash
+            )
+        );
 
-        d.submittedResults[msg.sender] = resultHash;
-        d.resultCounts[resultHash] += 1;
-        d.submissionCount += 1;
+        bytes32 ethSignedMessageHash =
+            keccak256(
+                abi.encodePacked(
+                    "\x19Ethereum Signed Message:\n32",
+                    message
+                )
+            );
 
-        emit ResultSubmitted(disputeId, msg.sender, resultHash);
+        uint256 validSignatures = 0;
+        address[] memory seen = new address[](signatures.length);
 
-        if (d.resultCounts[resultHash] >= 3) {
-            d.finalResultHash = resultHash;
-            d.finalized = true;
-            emit DisputeFinalized(disputeId, resultHash);
+        for (uint i = 0; i < signatures.length; i++) {
+
+            address signer = recoverSigner(ethSignedMessageHash, signatures[i]);
+
+            if (
+                registry.isArbitratorActive(signer) &&
+                !_isDuplicate(seen, signer)
+            ) {
+                seen[validSignatures] = signer;
+                validSignatures++;
+            }
         }
+
+        require(validSignatures >= 3, "Not enough valid signatures");
+
+        d.finalResultHash = resultHash;
+        d.finalized = true;
+
+        emit DisputeFinalized(disputeId, resultHash);
     }
 
-    function finalizeWithCID(uint256 disputeId, string memory cid) external {
+    function setExplanationCID(uint256 disputeId, string memory cid) external {
+
         Dispute storage d = disputes[disputeId];
+
+        require(d.exists, "Dispute does not exist");
         require(d.finalized, "Not finalized yet");
         require(bytes(d.explanationCID).length == 0, "CID already set");
 
         d.explanationCID = cid;
     }
 
-    function _isSelectedArbitrator(address[] memory arr, address addr) internal pure returns (bool) {
-        for (uint256 i = 0; i < arr.length; i++) {
+    function recoverSigner(bytes32 hash, bytes memory signature)
+        internal pure returns (address)
+    {
+        require(signature.length == 65, "Invalid signature length");
+
+        bytes32 r;
+        bytes32 s;
+        uint8 v;
+
+        assembly {
+            r := mload(add(signature, 32))
+            s := mload(add(signature, 64))
+            v := byte(0, mload(add(signature, 96)))
+        }
+
+        return ecrecover(hash, v, r, s);
+    }
+
+    function _isDuplicate(address[] memory arr, address addr)
+        internal pure returns (bool)
+    {
+        for (uint i = 0; i < arr.length; i++) {
             if (arr[i] == addr) return true;
         }
         return false;
     }
-
-    function _isAlreadySelected(address[] memory arr, address addr) internal pure returns (bool) {
-        for (uint256 i = 0; i < arr.length; i++) {
-            if (arr[i] == addr) return true;
-        }
-        return false;
-    }
-
-    function getSelectedArbitrators(uint256 disputeId) external view returns (address[] memory) {
-        return disputes[disputeId].selectedArbitrators;  
-    }
-    
-    function getDisputeMeta(uint256 disputeId) external view returns (bool finalized, string memory explanationCID) {
-        Dispute storage d = disputes[disputeId];
-        return (d.finalized, d.explanationCID);
-    }
-
 }

@@ -1,0 +1,11 @@
+{
+  "disputeId": 1,
+  "resultHash": "ea744a33...",
+  "decision": "Agent A wins",
+  "analysis": "Nash equilibrium converged to A",
+  "signers": [
+    "0x6D0c69e33FaC23a8D2D5E881F873630E1fEEed7c",
+    "0x2Ed1cceA354691774a8630694E174a54Ac7be93f",
+    "0xB4516df9E61e3e93Bb5F91f776627AD628040885"
+  ]
+}
