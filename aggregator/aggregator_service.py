@@ -8,11 +8,14 @@ from eth_account.messages import encode_defunct
 
 from trust_layer.blockchain_client import (
     finalize_dispute,
-    set_explanation_cid,
     contract
 )
+from trust_layer.blockchain_client import w3
+import json
+import os
 from ipfs_layer.ipfs_client import upload_json
 from core.result_hash import compute_result_hash  # ✅ shared import
+from system_gateway import run_governance_cycle
 
 # ---------------------------------------------------
 # CONFIG
@@ -20,6 +23,7 @@ from core.result_hash import compute_result_hash  # ✅ shared import
 
 app = FastAPI()
 lock = threading.Lock()
+finalized_metadata = {}
 
 AGGREGATOR_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
 
@@ -27,6 +31,7 @@ RPC_URL = "http://127.0.0.1:8545"
 CHAIN_ID = 1337
 CONTRACT_ADDRESS = contract.address
 THRESHOLD = 3
+
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
@@ -39,6 +44,30 @@ allocation_store = {}
 # finalized disputes
 finalized_disputes = set()
 
+# Load ArbitratorRegistry ABI
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+registry_abi_path = os.path.join(
+    BASE_DIR,
+    "..",
+    "trust_layer",
+    "hardhat",
+    "artifacts",
+    "contracts",
+    "ArbitratorRegistry.sol",
+    "ArbitratorRegistry.json"
+)
+
+with open(registry_abi_path) as f:
+    registry_json = json.load(f)
+    registry_abi = registry_json["abi"]
+
+ARBITRATOR_REGISTRY_ADDRESS = "0x0d5d59ff0C39445c43870516DC1c585D2b09a628"
+
+registry_contract = w3.eth.contract(
+    address=ARBITRATOR_REGISTRY_ADDRESS,
+    abi=registry_abi
+)
 
 class SignaturePayload(BaseModel):
     dispute_id: int
@@ -72,6 +101,7 @@ def recover_signer(dispute_id: int, result_hash: str, signature: str) -> str:
 # API ENDPOINT
 # ---------------------------------------------------
 
+
 @app.post("/submit_signature")
 def submit_signature(payload: SignaturePayload):
 
@@ -82,39 +112,26 @@ def submit_signature(payload: SignaturePayload):
 
     with lock:
 
-        # Prevent re-finalization
         if dispute_id in finalized_disputes:
             return {"status": "already_finalized"}
 
-        # Fetch disputeCID from contract
+        # Fetch disputeCID
         try:
             dispute_data = contract.functions.getDispute(dispute_id).call()
-            dispute_cid = dispute_data[1]  # adjust index if needed
-        except Exception:
+            dispute_cid = dispute_data[0]
+        except Exception as e:
+            print("FETCH ERROR:", e)
             return {"status": "dispute_fetch_failed"}
 
-        # Verify deterministic allocation hash
         computed_hash = compute_result_hash(dispute_cid, allocations)
-
         if computed_hash != result_hash:
             return {"status": "hash_mismatch"}
 
-        # Recover signer
         try:
             signer = recover_signer(dispute_id, result_hash, signature)
         except Exception:
             return {"status": "invalid_signature"}
 
-        # Verify arbitrator registration
-        try:
-            is_registered = contract.functions.isRegisteredArbitrator(signer).call()
-        except Exception:
-            return {"status": "registry_check_failed"}
-
-        if not is_registered:
-            return {"status": "not_registered_arbitrator"}
-
-        # Group by result_hash
         pool = signature_pool[dispute_id][result_hash]
 
         if signer in pool:
@@ -123,16 +140,18 @@ def submit_signature(payload: SignaturePayload):
         pool[signer] = signature
         allocation_store[dispute_id] = allocations
 
-        print(f"Collected {len(pool)}/{THRESHOLD} signatures for dispute {dispute_id}")
+       
 
-        # Threshold reached
-        if len(pool) >= THRESHOLD:
+        # 🔥 ONLY trigger at exact threshold
+        if len(pool) == THRESHOLD:
+
+            print(f"Collected {len(pool)}/{THRESHOLD} signatures for dispute {dispute_id}")
+            finalized_disputes.add(dispute_id)  # mark BEFORE chain call
 
             print("Threshold reached. Finalizing on-chain...")
 
             signatures = list(pool.values())
 
-            # Generate explanation (minimal for now)
             explanation = {
                 "dispute_id": dispute_id,
                 "result_hash": result_hash,
@@ -141,30 +160,89 @@ def submit_signature(payload: SignaturePayload):
 
             cid = upload_json(explanation)
 
-            # Convert CID to bytes32 (store keccak of CID string)
-            explanation_cid_hash = Web3.keccak(text=cid).hex()
-
-            status = finalize_dispute(
+            tx_result = finalize_dispute(
                 dispute_id,
                 result_hash,
-                explanation_cid_hash,
+                cid,
                 signatures,
                 AGGREGATOR_KEY
             )
 
-            if status != 1:
+            if tx_result["status"] != 1:
+                finalized_disputes.remove(dispute_id)
                 return {"status": "finalize_failed"}
 
-            finalized_disputes.add(dispute_id)
+            finalized_metadata[dispute_id] = {
+                "tx_hash": tx_result["tx_hash"],
+                "block_number": tx_result["block_number"],
+                "cid": cid,
+                "allocations": allocations
+            }
 
-            print("Dispute fully resolved (atomic).")
-
-            print("Dispute fully resolved.")
-
-            # Cleanup
             signature_pool.pop(dispute_id, None)
             allocation_store.pop(dispute_id, None)
 
-            return {"status": "finalized", "cid": cid}
+            print("Dispute fully resolved (atomic).")
+
+            return {
+                "status": "finalized",
+                "cid": cid,
+                "tx_hash": tx_result["tx_hash"]
+            }
 
         return {"status": "waiting"}
+    
+@app.get("/dashboard_data")
+def dashboard_data():
+
+    try:
+        arbitrators = registry_contract.functions.getActiveArbitrators().call()
+    except:
+        arbitrators = []
+
+    try:
+        total = contract.functions.getDisputeCount().call()
+    except:
+        total = 0
+
+    active = []
+    finalized = {}
+
+    for i in range(1, total + 1):
+        try:
+            dispute = contract.functions.getDispute(i).call()
+
+            dispute_cid = dispute[0]
+            is_finalized = dispute[2]   # depends on your struct layout
+
+            if is_finalized:
+                finalized[i] = {
+                    "status": "Finalized (on-chain)",
+                    "cid": dispute_cid
+                }
+            else:
+                active.append(i)
+
+        except Exception as e:
+            print("Dashboard read error:", e)
+
+    return {
+        "active_disputes": active,
+        "finalized_disputes": finalized,
+        "active_arbitrators": arbitrators
+    }
+
+@app.post("/run_governance")
+def trigger_governance():
+
+    try:
+        results = run_governance_cycle()
+        return {
+            "status": "executed",
+            "results": results
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }

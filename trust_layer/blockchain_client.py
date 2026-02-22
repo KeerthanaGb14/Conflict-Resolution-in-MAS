@@ -20,7 +20,7 @@ with open(abi_path) as f:
     contract_json = json.load(f)
     abi = contract_json["abi"]
 
-DISPUTE_MANAGER_ADDRESS = "0xbdDB6221AAd47bA3A9ec2E67142e21843a0cE04D"
+DISPUTE_MANAGER_ADDRESS = "0x56CA4Dc4cbd37456adFe20238c23dAEfD690dCc5"
 
 contract = w3.eth.contract(
     address=DISPUTE_MANAGER_ADDRESS,
@@ -46,8 +46,17 @@ def create_dispute(dispute_cid, private_key):
     tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
+    if receipt.status != 1:
+        raise Exception("Dispute creation failed")
+
     print(f"Dispute created by {local_account.address}: {tx_hash.hex()}")
 
+    # 🔥 Extract dispute_id from event log
+    logs = contract.events.DisputeCreated().process_receipt(receipt)
+
+    dispute_id = logs[0]["args"]["disputeId"]
+
+    return dispute_id
 def finalize_dispute(dispute_id, result_hash, explanation_cid, signatures, private_key):
 
     local_account = w3.eth.account.from_key(private_key)
@@ -55,12 +64,12 @@ def finalize_dispute(dispute_id, result_hash, explanation_cid, signatures, priva
     tx = contract.functions.finalizeDispute(
         dispute_id,
         Web3.to_bytes(hexstr=result_hash),
-        Web3.to_bytes(hexstr=explanation_cid),
+        explanation_cid,  # <-- now string
         [Web3.to_bytes(hexstr=s) for s in signatures]
     ).build_transaction({
         "from": local_account.address,
         "nonce": w3.eth.get_transaction_count(local_account.address, "pending"),
-        "gas": 1000000,
+        "gas": 1500000,
         "gasPrice": w3.to_wei("2", "gwei"),
         "chainId": 1337
     })
@@ -70,5 +79,8 @@ def finalize_dispute(dispute_id, result_hash, explanation_cid, signatures, priva
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
 
     print("Finalize TX:", tx_hash.hex())
-    return receipt.status
-
+    return {
+        "status": receipt.status,
+        "tx_hash": tx_hash.hex(),
+        "block_number": receipt.blockNumber
+    }

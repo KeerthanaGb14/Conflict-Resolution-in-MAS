@@ -100,29 +100,34 @@ def handle_dispute(event):
 # --------------------------------------------------
 # EVENT LISTENER
 # --------------------------------------------------
-
 def listen():
     print(f"[{NODE_NAME}] Listening for disputes...")
 
+    last_processed_block = w3.eth.block_number
+
     while True:
         try:
-            event_filter = contract.events.DisputeCreated.create_filter(
-                from_block="latest"
-            )
+            current_block = w3.eth.block_number
 
-            while True:
-                for event in event_filter.get_new_entries():
+            if current_block >= last_processed_block:
+
+                events = contract.events.DisputeCreated().get_logs(
+                    from_block=last_processed_block,
+                    to_block=current_block
+                )
+
+                for event in events:
                     handle_dispute(event)
 
-                time.sleep(2)
+                last_processed_block = current_block + 1
+
+            time.sleep(2)
 
         except Exception as e:
             print(f"[{NODE_NAME}] Listener error:", str(e))
-            print(f"[{NODE_NAME}] Reconnecting in 5 seconds...")
             time.sleep(5)
-
-
 # --------------------------------------------------
 
 if __name__ == "__main__":
+    
     listen()

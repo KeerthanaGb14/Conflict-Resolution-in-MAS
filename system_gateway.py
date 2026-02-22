@@ -1,30 +1,19 @@
 from collections import defaultdict
+import time
+
 from agent_module.agents import get_all_requests
 from ipfs_layer.ipfs_client import upload_json
 from trust_layer.blockchain_client import create_dispute
-from conflict_engine.decision_engine import check_policy
-import time
+from conflict_engine.decision_engine import resolve_conflict
 
 OWNER_PRIVATE_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
 
-def detect_conflicts(requests):
-    """
-    Groups requests by target.
-    Returns only targets with >1 requests.
-    """
 
-    target_map = defaultdict(list)
-
-    for req in requests:
-        target_map[req["target"]].append(req)
-
-    conflicts = {}
-
-    for target, reqs in target_map.items():
-        if len(reqs) > 1:
-            conflicts[target] = reqs
-
-    return conflicts
+def group_by_target(requests):
+    grouped = defaultdict(list)
+    for r in requests:
+        grouped[r["target"]].append(r)
+    return grouped
 
 
 def create_conflict_json(conflict_id, target, requests):
@@ -36,24 +25,26 @@ def create_conflict_json(conflict_id, target, requests):
     }
 
 
-def main():
+def run_governance_cycle():
+    results = []
 
-    print("\nFetching agent requests...")
     requests = get_all_requests()
 
-    print("Total requests:", len(requests))
+    if not requests:
+        return [{"status": "No requests"}]
 
-    conflicts = detect_conflicts(requests)
-
-    if not conflicts:
-        print("No conflicts detected.")
-        return
-
-    print(f"Detected {len(conflicts)} conflicts")
+    grouped = group_by_target(requests)
 
     conflict_counter = 1
 
-    for target, reqs in conflicts.items():
+    for target, reqs in grouped.items():
+
+        if len(reqs) == 1:
+            results.append({
+                "target": target,
+                "status": "Single request — granted locally"
+            })
+            continue
 
         conflict_json = create_conflict_json(
             conflict_id=conflict_counter,
@@ -61,24 +52,41 @@ def main():
             requests=reqs
         )
 
-        print(f"\nChecking policy for conflict {conflict_counter}...")
+        decision = resolve_conflict(conflict_json)
 
-        if not check_policy(conflict_json):
-            print("Conflict rejected by OPA policy.")
+        if "rejected" in decision["reason"].lower():
+            results.append({
+                "target": target,
+                "status": "Rejected by policy"
+            })
             conflict_counter += 1
             continue
 
-        print("Policy compliant. Uploading to IPFS...")
+        if decision.get("winner"):
+            results.append({
+                "target": target,
+                "status": f"Winner: {decision['winner']}"
+            })
+            conflict_counter += 1
+            continue
+
+        # Escalate
         cid = upload_json(conflict_json)
+        dispute_id = create_dispute(cid, OWNER_PRIVATE_KEY)
 
-        print("CID:", cid)
+        results.append({
+            "target": target,
+            "status": "Escalated to arbitration",
+            "cid": cid,
+            "dispute_id": dispute_id
+        })
 
-        print("Creating dispute on blockchain...")
-        create_dispute(cid, OWNER_PRIVATE_KEY)
-
+        
         conflict_counter += 1
         time.sleep(1)
 
+    return results
+
 
 if __name__ == "__main__":
-    main()
+    print(run_governance_cycle())

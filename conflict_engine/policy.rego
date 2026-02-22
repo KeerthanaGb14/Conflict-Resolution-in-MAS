@@ -1,16 +1,6 @@
-# Individual Layer
-## Filters malformed requests
-## Ensures urgency valid
-## Ensures utility bounded
-## Ensures timestamp exists
 
-# Collective Layer
-## Requires real conflict
-## Prevents duplicate agent IDs
-## Prevents rapid timestamp spam
-## Blocks system shutdown states
-## Allows scarcity escalation
-## Does NOT block overload
+
+
 
 
 

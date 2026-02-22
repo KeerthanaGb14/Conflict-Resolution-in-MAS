@@ -22,7 +22,11 @@ contract DisputeManager {
     mapping(uint256 => Dispute) public disputes;
 
     event DisputeCreated(uint256 disputeId, string disputeCID);
-    event DisputeFinalized(uint256 disputeId, bytes32 resultHash);
+    event DisputeFinalized(
+        uint256 disputeId,
+        bytes32 resultHash,
+        string explanationCID
+    );
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not authorized");
@@ -48,9 +52,33 @@ contract DisputeManager {
         emit DisputeCreated(disputeCounter, _disputeCID);
     }
 
+    function getDispute(uint256 disputeId)
+        external
+        view
+        returns (
+            string memory disputeCID,
+            bytes32 finalResultHash,
+            string memory explanationCID,
+            bool finalized,
+            bool exists
+        )
+    {
+        Dispute storage d = disputes[disputeId];
+        require(d.exists, "Dispute does not exist");
+
+        return (
+            d.disputeCID,
+            d.finalResultHash,
+            d.explanationCID,
+            d.finalized,
+            d.exists
+        );
+    }
+
     function finalizeDispute(
         uint256 disputeId,
         bytes32 resultHash,
+        string memory explanationCID,
         bytes[] memory signatures
     ) external {
 
@@ -96,20 +124,10 @@ contract DisputeManager {
         require(validSignatures >= 3, "Not enough valid signatures");
 
         d.finalResultHash = resultHash;
+        d.explanationCID = explanationCID;
         d.finalized = true;
 
-        emit DisputeFinalized(disputeId, resultHash);
-    }
-
-    function setExplanationCID(uint256 disputeId, string memory cid) external {
-
-        Dispute storage d = disputes[disputeId];
-
-        require(d.exists, "Dispute does not exist");
-        require(d.finalized, "Not finalized yet");
-        require(bytes(d.explanationCID).length == 0, "CID already set");
-
-        d.explanationCID = cid;
+        emit DisputeFinalized(disputeId, resultHash, explanationCID);
     }
 
     function recoverSigner(bytes32 hash, bytes memory signature)

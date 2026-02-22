@@ -30,7 +30,6 @@ def check_collective_policy(conflict_data):
 # --------------------------------------------------
 # Conflict Resolution
 # --------------------------------------------------
-
 def resolve_conflict(conflict_json: dict) -> dict:
 
     validate_conflict(conflict_json)
@@ -38,10 +37,6 @@ def resolve_conflict(conflict_json: dict) -> dict:
     conflict_id = conflict_json["conflict_id"]
     target = conflict_json["target"]
     requests_list = conflict_json["requests"]
-
-    # -------------------------------
-    # STEP 1: Individual Filtering
-    # -------------------------------
 
     valid_requests = []
     rejected_requests = []
@@ -52,32 +47,23 @@ def resolve_conflict(conflict_json: dict) -> dict:
         else:
             rejected_requests.append(r["agent_id"])
 
-    # If all rejected → stop
     if len(valid_requests) == 0:
         return {
             "conflict_id": conflict_id,
-            "winner": None,
-            "losers": rejected_requests,
-            "reason": "All requests rejected by individual policy",
-            "scores": {}
+            "status": "rejected",
+            "rejected_agents": rejected_requests,
+            "accepted_agents": [],
+            "reason": "All requests rejected by individual policy"
         }
-
-    # -------------------------------
-    # STEP 2: Single Request Case
-    # -------------------------------
 
     if len(valid_requests) == 1:
         return {
             "conflict_id": conflict_id,
+            "status": "granted",
             "winner": valid_requests[0]["agent_id"],
-            "losers": rejected_requests,
-            "reason": "Single valid request — granted directly",
-            "scores": {}
+            "rejected_agents": rejected_requests,
+            "reason": "Single valid request — granted directly"
         }
-
-    # -------------------------------
-    # STEP 3: Collective Policy Check
-    # -------------------------------
 
     collective_input = {
         "target": target,
@@ -92,21 +78,16 @@ def resolve_conflict(conflict_json: dict) -> dict:
     if not check_collective_policy(collective_input):
         return {
             "conflict_id": conflict_id,
-            "winner": None,
-            "losers": [r["agent_id"] for r in valid_requests],
-            "reason": "Conflict rejected by collective policy",
-            "scores": {}
+            "status": "rejected_collective",
+            "rejected_agents": [r["agent_id"] for r in valid_requests],
+            "reason": "Conflict rejected by collective policy"
         }
-
-    # -------------------------------
-    # STEP 4: Escalate to Arbitration
-    # -------------------------------
 
     return {
         "conflict_id": conflict_id,
-        "winner": None,
-        "losers": [],
-        "reason": "Conflict compliant with policy — escalate to arbitration",
-        "scores": {},
+        "status": "escalated",
+        "rejected_agents": rejected_requests,
+        "accepted_agents": [r["agent_id"] for r in valid_requests],
+        "reason": "Escalated to arbitration",
         "requests": valid_requests
     }

@@ -10,7 +10,7 @@ with open("D:\\Conflict-Resolution-in-MAS\\trust_layer\\hardhat\\artifacts\\cont
     artifact = json.load(f)
 
 registry = w3.eth.contract(
-    address=w3.to_checksum_address("0x5c20bf69785e830b0Cd6Ed96E02fABD918d3D90D"),
+    address=w3.to_checksum_address("0x0d5d59ff0C39445c43870516DC1c585D2b09a628"),
     abi=artifact["abi"]
 )
 
