@@ -6,7 +6,7 @@ REQUIRED_REQUEST_FIELDS = [
     "urgency",
     "timestamp"
 ]
-
+    
 def validate_conflict(conflict_json: dict) -> None:
 
     if "conflict_id" not in conflict_json:

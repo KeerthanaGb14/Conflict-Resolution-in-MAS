@@ -132,9 +132,22 @@ def submit_signature(payload: SignaturePayload):
 
             signatures = list(pool.values())
 
+            # Generate explanation (minimal for now)
+            explanation = {
+                "dispute_id": dispute_id,
+                "result_hash": result_hash,
+                "allocations": allocations
+            }
+
+            cid = upload_json(explanation)
+
+            # Convert CID to bytes32 (store keccak of CID string)
+            explanation_cid_hash = Web3.keccak(text=cid).hex()
+
             status = finalize_dispute(
                 dispute_id,
                 result_hash,
+                explanation_cid_hash,
                 signatures,
                 AGGREGATOR_KEY
             )
@@ -144,15 +157,7 @@ def submit_signature(payload: SignaturePayload):
 
             finalized_disputes.add(dispute_id)
 
-            # Explanation generation
-            explanation = {
-                "dispute_id": dispute_id,
-                "result_hash": result_hash,
-                "allocations": allocations
-            }
-
-            cid = upload_json(explanation)
-            set_explanation_cid(dispute_id, cid, AGGREGATOR_KEY)
+            print("Dispute fully resolved (atomic).")
 
             print("Dispute fully resolved.")
 
