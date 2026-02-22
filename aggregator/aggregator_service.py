@@ -4,7 +4,10 @@ from collections import defaultdict
 from web3 import Web3
 from trust_layer.blockchain_client import finalize_dispute, set_explanation_cid
 from ipfs_layer.ipfs_client import upload_json
+from trust_layer.blockchain_client import contract
+import threading
 
+lock = threading.Lock()
 app = FastAPI()
 
 AGGREGATOR_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
@@ -12,13 +15,12 @@ AGGREGATOR_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe238881
 # dispute_id -> result_hash -> signatures
 signature_pool = defaultdict(lambda: defaultdict(list))
 allocation_store = {}
-
+finalized_disputes = set()
 class SignaturePayload(BaseModel):
     dispute_id: int
     result_hash: str
     signature: str
     allocations: dict
-
 
 @app.post("/submit_signature")
 def submit_signature(payload: SignaturePayload):
@@ -27,41 +29,56 @@ def submit_signature(payload: SignaturePayload):
     result_hash = payload.result_hash
     signature = payload.signature
 
-    pool = signature_pool[dispute_id][result_hash]
+    with lock:
 
-    if signature in pool:
-        return {"status": "duplicate"}
+        if dispute_id in finalized_disputes:
+            return {"status": "already_finalized"}
 
-    pool.append(signature)
-    allocation_store[dispute_id] = payload.allocations
 
-    print(f"Collected {len(pool)}/3 signatures for dispute {dispute_id}")
+        pool = signature_pool[dispute_id][result_hash]
 
-    if len(pool) >= 3:
+        if signature in pool:
+            return {"status": "duplicate"}
 
-        print("Threshold reached. Finalizing on-chain...")
+        pool.append(signature)
+        allocation_store[dispute_id] = payload.allocations
 
-        status = finalize_dispute(
-            dispute_id,
-            result_hash,
-            pool,
-            AGGREGATOR_KEY
-        )
+        print(f"Collected {len(pool)}/3 signatures for dispute {dispute_id}")
 
-        if status == 1:
-            explanation = {
-                "dispute_id": dispute_id,
-                "result_hash": result_hash,
-                "allocations": allocation_store[dispute_id]
-            }
+        
+        if len(pool) >= 3:
 
-            cid = upload_json(explanation)
-            set_explanation_cid(dispute_id, cid, AGGREGATOR_KEY)
+            print("Threshold reached. Finalizing on-chain...")
 
-            print("Dispute fully resolved.")
+            status = finalize_dispute(
+                dispute_id,
+                result_hash,
+                pool,
+                AGGREGATOR_KEY
+            )
 
-            return {"status": "finalized", "cid": cid}
+            if status == 1:
 
-        return {"status": "failed"}
+                finalized_disputes.add(dispute_id)
 
-    return {"status": "waiting"}
+                explanation = {
+                    "dispute_id": dispute_id,
+                    "result_hash": result_hash,
+                    "allocations": allocation_store[dispute_id]
+                }
+
+                cid = upload_json(explanation)
+
+                set_explanation_cid(dispute_id, cid, AGGREGATOR_KEY)
+
+                print("Dispute fully resolved.")
+
+                signature_pool.pop(dispute_id, None)
+                allocation_store.pop(dispute_id, None)
+
+                return {"status": "finalized", "cid": cid}
+
+            return {"status": "failed"}
+
+        
+        return {"status": "waiting"}

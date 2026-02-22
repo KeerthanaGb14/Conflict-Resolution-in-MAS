@@ -19,8 +19,8 @@ dispute = w3.eth.contract(
 conflict_data = {
     "total_resource": 100,
     "requests": [
-        {"agent_id": "A", "utility": 10, "urgency": 5, "guilt": 0},
-        {"agent_id": "B", "utility": 8, "urgency": 7, "guilt": 1},
+        {"agent_id": "A", "utility": 15, "urgency": 5, "guilt": 0},
+        {"agent_id": "B", "utility": 8, "urgency": 10, "guilt": 1},
         {"agent_id": "C", "utility": 6, "urgency": 9, "guilt": 2}
     ]
 }

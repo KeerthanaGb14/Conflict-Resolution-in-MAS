@@ -1,8 +1,9 @@
 import random
 import time
 from typing import List, Dict
-
-from langchain_groq import ChatGroq
+import dotenv
+dotenv.load_dotenv()
+from langchain_groq import ChatGroq 
 from langchain_core.messages import HumanMessage
 
 # =========================

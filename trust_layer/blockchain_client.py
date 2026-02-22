@@ -2,6 +2,7 @@ from web3 import Web3
 import json
 import os
 
+
 w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
