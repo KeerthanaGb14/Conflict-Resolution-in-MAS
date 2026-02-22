@@ -2,3 +2,7 @@ langchain
 langchain-core
 langchain-groq
 langchain-community
+streamlit
+matplotlib
+plotly
+pandas

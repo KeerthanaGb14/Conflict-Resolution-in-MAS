@@ -4,14 +4,14 @@ from decimal import Decimal
 PRECISION = 6
 
 
-def canonicalize_allocation(input_hash: str, allocations: dict) -> bytes:
+def canonicalize_allocation(dispute_cid: str, allocations: dict) -> bytes:
     """
-    Deterministic byte format:
-    input_hash|agent1:amount|agent2:amount|...
+    Deterministic format:
+    disputeCID|agent1:amount|agent2:amount|...
     """
 
     sorted_agents = sorted(allocations.keys())
-    parts = [input_hash]
+    parts = [dispute_cid]
 
     for agent in sorted_agents:
         value = Decimal(str(allocations[agent]))
@@ -23,7 +23,7 @@ def canonicalize_allocation(input_hash: str, allocations: dict) -> bytes:
     return final_string.encode("utf-8")
 
 
-def compute_result_hash(input_hash: str, allocations: dict) -> str:
-    canonical_bytes = canonicalize_allocation(input_hash, allocations)
+def compute_result_hash(dispute_cid: str, allocations: dict) -> str:
+    canonical_bytes = canonicalize_allocation(dispute_cid, allocations)
     hash_bytes = Web3.keccak(canonical_bytes)
     return hash_bytes.hex()

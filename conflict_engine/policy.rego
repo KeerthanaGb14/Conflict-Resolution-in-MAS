@@ -1,24 +1,24 @@
 package conflict
 
-default allow = false
+default allow := false
 
-# Example: resource capacity rule
-allow {
+# Rule 1: Resource capacity constraint
+allow if {
     input.total_resource >= total_requested
-}
-
-total_requested = sum([r.utility | r := input.requests[_]])
-
-# Example: max urgency limit
-allow {
     all_valid
 }
 
-all_valid {
+# Calculate total requested utility
+# total_requested := sum([r.utility | r := input.requests[_]])
+
+total_requested := sum([r.urgency | r := input.requests[_]])
+
+# Ensure all requests are valid
+all_valid if {
     not invalid_request
 }
 
-invalid_request {
+invalid_request if {
     some i
     input.requests[i].urgency > 10
 }

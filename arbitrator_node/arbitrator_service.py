@@ -5,7 +5,7 @@ from web3 import Web3
 from eth_account.messages import encode_defunct
 
 from arbitrator_node.nash_solver import compute_nsw_allocation
-from arbitrator_node.result_hash import compute_result_hash
+from core.result_hash import compute_result_hash
 from trust_layer.blockchain_client import contract
 from ipfs_layer.ipfs_client import fetch_json
 
@@ -67,42 +67,35 @@ def handle_dispute(event):
         dispute_cid = event["args"]["disputeCID"]
 
         print(f"\n[{NODE_NAME}] New dispute detected: {dispute_id}")
-        print(f"[{NODE_NAME}] Fetching dispute from IPFS...")
 
         conflict = fetch_json(dispute_cid)
-
-        print(f"[{NODE_NAME}] Computing NSW allocation...")
 
         result = compute_nsw_allocation(conflict)
         allocations = result["allocations"]
 
-        result_hash = compute_result_hash(dispute_cid, allocations)
+        # Step 1: Deterministic allocation hash
+        allocation_hash = compute_result_hash(dispute_cid, allocations)
 
-        print(f"[{NODE_NAME}] Result hash: {result_hash}")
+        print(f"[{NODE_NAME}] Allocation hash: {allocation_hash}")
 
-        signature = sign_message(dispute_id, result_hash)
-
-        print(f"[{NODE_NAME}] Signature created. Sending to aggregator...")
+        # Step 2: Sign structured message
+        signature = sign_message(dispute_id, allocation_hash)
 
         response = requests.post(
             AGGREGATOR_URL,
             json={
                 "dispute_id": dispute_id,
-                "result_hash": result_hash,
+                "result_hash": allocation_hash,
                 "signature": signature,
                 "allocations": allocations
             },
             timeout=10
         )
 
-        try:
-            print("Aggregator response:", response.json())
-        except:
-            print("Aggregator returned non-JSON response")
+        print("Aggregator response:", response.json())
 
     except Exception as e:
-        print(f"[{NODE_NAME}] ERROR while processing dispute:", str(e))
-
+        print(f"[{NODE_NAME}] ERROR:", str(e))
 
 # --------------------------------------------------
 # EVENT LISTENER
