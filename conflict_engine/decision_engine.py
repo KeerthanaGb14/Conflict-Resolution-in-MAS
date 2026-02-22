@@ -17,30 +17,23 @@ def resolve_conflict(conflict_json: dict) -> dict:
     conflict_id = conflict_json["conflict_id"]
     requests = conflict_json["requests"]
 
-    approved_agents = []
-
-    for req in requests:
-        req.setdefault("guilt", 0)
-        if check_policy(req):
-            approved_agents.append(req)
-
-    if not approved_agents:
+    # Check full conflict against OPA
+    if not check_policy(conflict_json):
         return {
             "conflict_id": conflict_id,
             "winner": None,
             "losers": [r["agent_id"] for r in requests],
-            "reason": "No agent satisfied policy",
+            "reason": "Conflict rejected by organizational policy",
             "scores": {}
         }
 
-    winner = max(approved_agents, key=lambda r: r["utility"])
-
-    losers = [r["agent_id"] for r in requests if r["agent_id"] != winner["agent_id"]]
+    # If policy allows → DO NOT compute winner here
+    # Arbitration layer (NSW) will decide
 
     return {
         "conflict_id": conflict_id,
-        "winner": winner["agent_id"],
-        "losers": losers,
-        "reason": "Approved by OPA policy",
+        "winner": None,
+        "losers": [],
+        "reason": "Conflict compliant with policy, escalate to arbitration",
         "scores": {}
     }

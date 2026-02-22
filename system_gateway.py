@@ -2,6 +2,7 @@ from collections import defaultdict
 from agent_module.agents import get_all_requests
 from ipfs_layer.ipfs_client import upload_json
 from trust_layer.blockchain_client import create_dispute
+from conflict_engine.decision_engine import check_policy
 import time
 
 OWNER_PRIVATE_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
@@ -60,7 +61,14 @@ def main():
             requests=reqs
         )
 
-        print(f"\nUploading conflict {conflict_counter} to IPFS...")
+        print(f"\nChecking policy for conflict {conflict_counter}...")
+
+        if not check_policy(conflict_json):
+            print("Conflict rejected by OPA policy.")
+            conflict_counter += 1
+            continue
+
+        print("Policy compliant. Uploading to IPFS...")
         cid = upload_json(conflict_json)
 
         print("CID:", cid)
@@ -69,7 +77,6 @@ def main():
         create_dispute(cid, OWNER_PRIVATE_KEY)
 
         conflict_counter += 1
-
         time.sleep(1)
 
 
