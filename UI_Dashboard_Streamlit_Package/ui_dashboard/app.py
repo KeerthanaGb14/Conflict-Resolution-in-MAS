@@ -1,10 +1,25 @@
-
 import streamlit as st
 import pandas as pd
 import random
 
-st.set_page_config(page_title="Decentralized AI Governance", layout="wide")
+# ---------------- SAFE IMPORTS ---------------- #
 
+try:
+    from agent_module.agents import get_all_requests
+except:
+    get_all_requests = None
+
+try:
+    from conflict_engine.decision_engine import check_policy
+except:
+    check_policy = None
+
+
+compute_nsw = None
+
+# ---------------- PAGE CONFIG ---------------- #
+
+st.set_page_config(page_title="Decentralized AI Governance", layout="wide")
 st.title("Decentralized AI Organizational Governance Dashboard")
 
 st.sidebar.title("Navigation")
@@ -15,15 +30,15 @@ section = st.sidebar.radio(
         "Agents",
         "Conflicts",
         "Policy",
-        "Blockchain",
         "Arbitration",
         "Tokens",
         "Workflow"
     ]
 )
 
-# Dummy Data (Replace with real backend imports later)
-def get_agents():
+# ---------------- DUMMY DATA FALLBACK ---------------- #
+
+def dummy_agents():
     return pd.DataFrame({
         "Agent": [f"A{i}" for i in range(1, 6)],
         "Utility": [random.randint(5, 15) for _ in range(5)],
@@ -32,67 +47,130 @@ def get_agents():
         "Tokens": [random.randint(50, 100) for _ in range(5)]
     })
 
-def get_conflicts():
-    return pd.DataFrame({
-        "Conflict ID": [1, 2],
-        "Target": ["GPU", "API_X"],
-        "Agents Involved": [3, 2],
-        "Status": ["Escalated", "Resolved"]
-    })
+def dummy_conflicts():
+    return [
+        {
+            "conflict_id": 1,
+            "target": "GPU",
+            "requests": [
+                {"agent_id": "A1", "utility": 10, "urgency": 3},
+                {"agent_id": "A2", "utility": 8, "urgency": 5}
+            ]
+        }
+    ]
 
-# ---------------------- Sections ----------------------
+# ---------------- OVERVIEW ---------------- #
 
 if section == "Overview":
     col1, col2, col3 = st.columns(3)
+
     col1.metric("Total Agents", 105)
     col2.metric("Active Conflicts", 2)
     col3.metric("Resolved Disputes", 5)
 
+# ---------------- AGENTS ---------------- #
+
 if section == "Agents":
     st.header("Agent Behavior")
-    agents = get_agents()
-    st.dataframe(agents)
-    st.bar_chart(agents.set_index("Agent")["Utility"])
+
+    agents_df = dummy_agents()
+    st.dataframe(agents_df)
+    st.bar_chart(agents_df.set_index("Agent")["Utility"])
+
+    st.subheader("Live Agent Requests")
+
+    if get_all_requests:
+        try:
+            requests = get_all_requests()
+            st.json(requests)
+        except Exception as e:
+            st.error(f"Backend error: {e}")
+    else:
+        st.warning("Backend not connected. Showing dummy data.")
+        st.json(dummy_conflicts())
+
+# ---------------- CONFLICTS ---------------- #
 
 if section == "Conflicts":
     st.header("Conflict Monitoring")
-    conflicts = get_conflicts()
-    st.dataframe(conflicts)
+
+    conflicts = dummy_conflicts()
+    for conflict in conflicts:
+        st.json(conflict)
+
+# ---------------- POLICY ---------------- #
 
 if section == "Policy":
-    st.header("OPA Policy Decisions")
-    st.success("Conflict 1: Policy Compliant")
-    st.error("Conflict 2: Rejected by Policy Rule")
+    st.header("OPA Policy Evaluation")
 
-if section == "Blockchain":
-    st.header("Blockchain Dispute Lifecycle")
-    st.write({
-        "Dispute ID": 1,
-        "CID": "QmExampleCID123",
-        "Block Number": 152,
-        "Status": "Finalized"
-    })
+    conflicts = dummy_conflicts()
+
+    for conflict in conflicts:
+        st.subheader(f"Conflict ID: {conflict['conflict_id']}")
+
+        if check_policy:
+            try:
+                allowed = check_policy(conflict)
+                if allowed:
+                    st.success("Policy Compliant")
+                else:
+                    st.error("Rejected by Policy")
+            except Exception as e:
+                st.error(f"Policy engine error: {e}")
+        else:
+            st.warning("Policy engine not connected.")
+            st.info("Simulated Result: Compliant")
+
+# ---------------- ARBITRATION ---------------- #
 
 if section == "Arbitration":
     st.header("Fairness & NSW Metrics")
-    st.metric("NSW Score", 72)
-    st.metric("Total Utility", 18)
-    st.metric("Gini Coefficient", 0.12)
+
+    conflict = dummy_conflicts()[0]
+    utilities = [r["utility"] for r in conflict["requests"]]
+
+    if compute_nsw:
+        try:
+            nsw_score = compute_nsw(conflict["requests"])
+        except:
+            nsw_score = sum(utilities)
+    else:
+        nsw_score = sum(utilities)
+
+    st.metric("NSW Score", nsw_score)
+    st.metric("Total Utility", sum(utilities))
+
+    score_df = pd.DataFrame({
+        "Agent": [r["agent_id"] for r in conflict["requests"]],
+        "Utility": utilities
+    })
+
+    st.bar_chart(score_df.set_index("Agent"))
+
+# ---------------- TOKENS ---------------- #
 
 if section == "Tokens":
     st.header("Token Economy")
-    agents = get_agents()
-    st.dataframe(agents[["Agent", "Tokens", "Guilt"]])
+
+    agents_df = dummy_agents()
+    st.dataframe(agents_df[["Agent", "Tokens", "Guilt"]])
+
+    st.info("Token slashing occurs when policy violations detected.")
+
+# ---------------- WORKFLOW ---------------- #
 
 if section == "Workflow":
     st.header("Full Dispute Workflow")
+
     st.write("""
-    1. Agent Generates Request  
-    2. Conflict Detected  
-    3. OPA Policy Check  
-    4. IPFS Storage  
-    5. Blockchain Dispute Creation  
-    6. Arbitrators Compute NSW  
-    7. Aggregator Finalizes  
-    8. Explanation Stored on IPFS  
+    1️⃣ Agent Generates Request  
+    2️⃣ Conflict Detected  
+    3️⃣ OPA Policy Check  
+    4️⃣ IPFS Storage  
+    5️⃣ Blockchain Dispute Creation  
+    6️⃣ Arbitrators Compute Nash Social Welfare  
+    7️⃣ Aggregator Finalizes  
+    8️⃣ Explanation Stored on IPFS  
     """)
+
+    st.success("End-to-End Decentralized Governance Process")
