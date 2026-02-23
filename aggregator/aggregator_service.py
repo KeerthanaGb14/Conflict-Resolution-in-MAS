@@ -13,9 +13,10 @@ from trust_layer.blockchain_client import (
 from trust_layer.blockchain_client import w3
 import json
 import os
-from ipfs_layer.ipfs_client import upload_json
+from ipfs_layer.ipfs_client import upload_json, fetch_json
 from core.result_hash import compute_result_hash  # ✅ shared import
 from system_gateway import run_governance_cycle
+from explain_module.explainer import generate_deterministic_explanation, generate_explanation
 
 # ---------------------------------------------------
 # CONFIG
@@ -23,7 +24,6 @@ from system_gateway import run_governance_cycle
 
 app = FastAPI()
 lock = threading.Lock()
-finalized_metadata = {}
 
 AGGREGATOR_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
 
@@ -62,7 +62,11 @@ with open(registry_abi_path) as f:
     registry_json = json.load(f)
     registry_abi = registry_json["abi"]
 
-ARBITRATOR_REGISTRY_ADDRESS = "0x0d5d59ff0C39445c43870516DC1c585D2b09a628"
+
+with open(os.path.join(BASE_DIR, "..", "trust_layer", "DeployedAddresses.json")) as f:
+    deployed = json.load(f)
+
+ARBITRATOR_REGISTRY_ADDRESS = deployed["ArbitratorRegistry"]
 
 registry_contract = w3.eth.contract(
     address=ARBITRATOR_REGISTRY_ADDRESS,
@@ -145,25 +149,46 @@ def submit_signature(payload: SignaturePayload):
         # 🔥 ONLY trigger at exact threshold
         if len(pool) == THRESHOLD:
 
-            print(f"Collected {len(pool)}/{THRESHOLD} signatures for dispute {dispute_id}")
-            finalized_disputes.add(dispute_id)  # mark BEFORE chain call
-
-            print("Threshold reached. Finalizing on-chain...")
+            finalized_disputes.add(dispute_id)
 
             signatures = list(pool.values())
 
-            explanation = {
+            # 1️⃣ Get disputeCID from chain
+            dispute_data = contract.functions.getDispute(dispute_id).call()
+            dispute_cid = dispute_data[0]
+
+            # 2️⃣ Fetch original conflict JSON from IPFS
+            try:
+                conflict_json = fetch_json(dispute_cid)
+            except Exception as e:
+                finalized_disputes.remove(dispute_id)
+                return {"status": "ipfs_fetch_failed", "error": str(e)}
+
+            # 3️⃣ Generate LLM explanation
+            try:
+                explanation_text = generate_explanation(conflict_json, allocations)
+            except Exception as e:
+                print("LLM error:", e)
+                explanation_text = generate_deterministic_explanation(conflict_json, allocations)
+
+            # 4️⃣ Prepare explanation payload
+            explanation_payload = {
                 "dispute_id": dispute_id,
+                "conflict_cid": dispute_cid,
                 "result_hash": result_hash,
-                "allocations": allocations
+                "total_resource": conflict_json.get("total_resource"),
+                "allocations": allocations,
+                "explanation": explanation_text,
             }
 
-            cid = upload_json(explanation)
+            # 5️⃣ Upload explanation JSON to IPFS
+            explanation_cid = upload_json(explanation_payload)
 
+            # 6️⃣ Store explanation CID on-chain
             tx_result = finalize_dispute(
                 dispute_id,
                 result_hash,
-                cid,
+                explanation_cid,
                 signatures,
                 AGGREGATOR_KEY
             )
@@ -172,26 +197,15 @@ def submit_signature(payload: SignaturePayload):
                 finalized_disputes.remove(dispute_id)
                 return {"status": "finalize_failed"}
 
-            finalized_metadata[dispute_id] = {
-                "tx_hash": tx_result["tx_hash"],
-                "block_number": tx_result["block_number"],
-                "cid": cid,
-                "allocations": allocations
-            }
-
             signature_pool.pop(dispute_id, None)
             allocation_store.pop(dispute_id, None)
 
-            print("Dispute fully resolved (atomic).")
-
             return {
                 "status": "finalized",
-                "cid": cid,
+                "explanation_cid": explanation_cid,
                 "tx_hash": tx_result["tx_hash"]
             }
-
-        return {"status": "waiting"}
-    
+        
 @app.get("/dashboard_data")
 def dashboard_data():
 
@@ -201,24 +215,54 @@ def dashboard_data():
         arbitrators = []
 
     try:
-        total = contract.functions.getDisputeCount().call()
+        total = contract.functions.disputeCounter().call()
     except:
         total = 0
 
     active = []
     finalized = {}
 
+    # 🔥 Fetch all finalize events once (not inside loop)
+    try:
+        finalize_events = contract.events.DisputeFinalized().get_logs(
+            from_block=0,
+            to_block="latest"
+        )
+    except:
+        finalize_events = []
+
+    # Build quick lookup: disputeId -> (tx_hash, block_number)
+    event_lookup = {}
+    for event in finalize_events:
+        dispute_id = event["args"]["disputeId"]
+        event_lookup[dispute_id] = {
+            "tx_hash": event["transactionHash"].hex(),
+            "block_number": event["blockNumber"]
+        }
+
     for i in range(1, total + 1):
         try:
             dispute = contract.functions.getDispute(i).call()
 
             dispute_cid = dispute[0]
-            is_finalized = dispute[2]   # depends on your struct layout
+            result_hash = dispute[1]
+            explanation_cid = dispute[2]
+            is_finalized = dispute[3]
+            exists = dispute[4]
+
+            if not exists:
+                continue
 
             if is_finalized:
+
+                tx_info = event_lookup.get(i, {})
+
                 finalized[i] = {
-                    "status": "Finalized (on-chain)",
-                    "cid": dispute_cid
+                    "cid": dispute_cid,
+                    "explanation_cid": explanation_cid,
+                    "result_hash": result_hash.hex(),
+                    "tx_hash": tx_info.get("tx_hash"),
+                    "block_number": tx_info.get("block_number")
                 }
             else:
                 active.append(i)

@@ -20,7 +20,11 @@ with open(abi_path) as f:
     contract_json = json.load(f)
     abi = contract_json["abi"]
 
-DISPUTE_MANAGER_ADDRESS = "0x56CA4Dc4cbd37456adFe20238c23dAEfD690dCc5"
+
+with open(os.path.join(BASE_DIR, "DeployedAddresses.json")) as f:
+    deployed = json.load(f)
+
+DISPUTE_MANAGER_ADDRESS = deployed["DisputeManager"]
 
 contract = w3.eth.contract(
     address=DISPUTE_MANAGER_ADDRESS,

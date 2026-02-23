@@ -1,9 +1,18 @@
+import json
+import sys
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, ".."))
+
+sys.path.append(PROJECT_ROOT)
+
 import streamlit as st
 import requests
 import pandas as pd
 from web3 import Web3
-import os
-import sys
+from conflict_engine.decision_engine import resolve_conflict
+
 
 # --------------------------------------------------
 # CONFIG
@@ -14,9 +23,9 @@ RPC_URL = "http://127.0.0.1:8545"
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-st.set_page_config(page_title="AI Governance Control Panel", layout="wide")
+st.set_page_config(page_title="Multi Agent Conflict Resolution Dashboard", layout="wide")
 
-st.title("AI Governance Control Panel")
+st.title("Multi Agent Conflict Resolution Dashboard")
 
 st.markdown("## Governance Controls")
 
@@ -140,18 +149,50 @@ if finalized_disputes:
             st.write("IPFS CID:", meta.get("cid"))
 
             st.subheader("Final Allocation")
-
-            allocations = meta.get("allocations", {})
-            if allocations:
-                alloc_df = pd.DataFrame(
-                    allocations.items(),
-                    columns=["Agent", "Allocated Resource"]
-                )
-                st.table(alloc_df)
-
             st.subheader("Explanation")
-            st.info("Explanation currently JSON-based. LLM layer coming next.")
 
+            explanation_cid = meta.get("explanation_cid")
+
+            
+
+            if explanation_cid:
+                try:
+                    ipfs_response = requests.get(
+                        f"http://127.0.0.1:8080/ipfs/{explanation_cid}",
+                        timeout=5
+                    )
+
+                    explanation_json = json.loads(ipfs_response.text)
+
+                    st.markdown(explanation_json.get("explanation", "No explanation available."))
+
+                    allocations = explanation_json.get("allocations", {})
+                    total_resource = explanation_json.get("total_resource", 0)
+
+                    if allocations:
+
+                        alloc_df = pd.DataFrame(
+                            [
+                                {
+                                    "Agent": agent,
+                                    "Allocated": value,
+                                    "Percentage (%)": round((value / total_resource) * 100, 2) if total_resource else "-"
+                                }
+                                for agent, value in allocations.items()
+                            ]
+                        )
+
+                        st.dataframe(
+                            alloc_df.sort_values("Allocated", ascending=False),
+                            use_container_width=True,
+                            height=350
+                        )
+
+                    else:
+                        st.warning("No allocation data available.")
+
+                except Exception as e:
+                    st.error(f"Failed to fetch explanation from IPFS: {e}")
 else:
     st.info("No finalized disputes yet.")
 
@@ -164,8 +205,7 @@ st.markdown("---")
 st.header("Rejected Requests")
 
 try:
-    from conflict_engine.decision_engine import resolve_conflict
-
+    
     rejected_rows = []
 
     if requests_data:
@@ -190,8 +230,8 @@ try:
     else:
         st.success("No rejected agents currently.")
 
-except:
-    st.info("Policy layer not reachable.")
+except Exception as e:
+    st.error(f"Policy evaluation error: {str(e)}")
 
 st.markdown("---")
 

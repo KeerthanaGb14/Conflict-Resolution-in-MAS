@@ -7,24 +7,36 @@ OPA_BASE_URL = "http://localhost:8181/v1/data/policy"
 # Individual Policy Check
 # --------------------------------------------------
 
-def check_individual_policy(request_data):
-    response = requests.post(
-        f"{OPA_BASE_URL}/individual/allow",
-        json={"input": request_data}
-    )
-    return response.json().get("result", False)
 
+def check_individual_policy(request_data):
+    try:
+        response = requests.post(
+            f"{OPA_BASE_URL}/individual/allow",
+            json={"input": request_data},
+            timeout=3
+        )
+        response.raise_for_status()
+        return response.json().get("result", False)
+    except Exception as e:
+        print("OPA Individual Error:", e)
+        raise
 
 # --------------------------------------------------
 # Collective Policy Check
 # --------------------------------------------------
 
 def check_collective_policy(conflict_data):
-    response = requests.post(
-        f"{OPA_BASE_URL}/collective/allow",
-        json={"input": conflict_data}
-    )
-    return response.json().get("result", False)
+    try:
+        response = requests.post(
+            f"{OPA_BASE_URL}/collective/allow",
+            json={"input": conflict_data},
+            timeout=3
+        )
+        response.raise_for_status()
+        return response.json().get("result", False)
+    except Exception as e:
+        print("OPA Collective Error:", e)
+        raise
 
 
 # --------------------------------------------------

@@ -1,3 +1,4 @@
+import os
 from web3 import Web3
 import json
 
@@ -6,11 +7,18 @@ w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
 PRIVATE_KEY = "8ab3f3dffd3548cd3cdfe8f5972886d12073053a773d5bbfe444fbbe23888153"
 OWNER = w3.to_checksum_address("0x091d58dd0F8ed75D9927Ef3bD0b13d8922D701F4")
 
-with open("D:\\Conflict-Resolution-in-MAS\\trust_layer\\hardhat\\artifacts\\contracts\\ArbitratorRegistry.sol\\ArbitratorRegistry.json") as f:
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+with open(os.path.join(BASE_DIR, "..", "DeployedAddresses.json")) as f:
+    deployed = json.load(f)
+
+ARBITRATOR_REGISTRY_ADDRESS = deployed["ArbitratorRegistry"]
+
+with open(os.path.join(BASE_DIR, "..", "hardhat", "artifacts", "contracts", "ArbitratorRegistry.sol", "ArbitratorRegistry.json")) as f:
     artifact = json.load(f)
 
 registry = w3.eth.contract(
-    address=w3.to_checksum_address("0x0d5d59ff0C39445c43870516DC1c585D2b09a628"),
+    address=w3.to_checksum_address(ARBITRATOR_REGISTRY_ADDRESS),
     abi=artifact["abi"]
 )
 

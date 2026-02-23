@@ -9,10 +9,13 @@ DEPLOYER_ADDRESS = "0x091d58dd0F8ed75D9927Ef3bD0b13d8922D701F4"
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_FILE = os.path.join(BASE_DIR, "DeployedAddresses.json")
+
 
 def load_contract_artifact(path):
     with open(path) as f:
         return json.load(f)
+
 
 def deploy_contract(abi, bytecode, constructor_args=[]):
 
@@ -59,7 +62,16 @@ if __name__ == "__main__":
         [registry_address]
     )
 
+    # 🔥 Save addresses to JSON file
+    deployed_data = {
+        "ArbitratorRegistry": registry_address,
+        "DisputeManager": dispute_address,
+        "ChainId": 1337
+    }
+
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(deployed_data, f, indent=4)
+
     print("\n============================")
-    print("ArbitratorRegistry:", registry_address)
-    print("DisputeManager:", dispute_address)
+    print("Saved to:", OUTPUT_FILE)
     print("============================")
