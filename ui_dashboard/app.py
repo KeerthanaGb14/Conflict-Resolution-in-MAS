@@ -271,3 +271,75 @@ if finalized_disputes:
     st.table(pd.DataFrame(tx_rows))
 else:
     st.info("No blockchain activity yet.")
+
+st.markdown("---")
+
+# ==================================================
+# SECTION 8 — REPLAY VERIFICATION
+# ==================================================
+
+st.header("Replay Verification")
+
+if finalized_disputes:
+
+    replay_rows = []
+
+    hash_counts = {}
+    tx_counts = {}
+
+    for meta in finalized_disputes.values():
+        result_hash = meta.get("result_hash")
+        tx_hash = meta.get("tx_hash")
+
+        if result_hash:
+            hash_counts[result_hash] = hash_counts.get(result_hash, 0) + 1
+        if tx_hash:
+            tx_counts[tx_hash] = tx_counts.get(tx_hash, 0) + 1
+
+    for dispute_id, meta in finalized_disputes.items():
+        result_hash = meta.get("result_hash")
+        tx_hash = meta.get("tx_hash")
+        block_number = meta.get("block_number")
+
+        hash_reused = bool(result_hash) and hash_counts.get(result_hash, 0) > 1
+        tx_reused = bool(tx_hash) and tx_counts.get(tx_hash, 0) > 1
+        missing_chain_proof = not result_hash or not tx_hash or block_number is None
+
+        status = "Flagged" if (hash_reused or tx_reused or missing_chain_proof) else "Pass"
+
+        replay_rows.append({
+            "Dispute ID": dispute_id,
+            "Block": block_number,
+            "Hash Reused": hash_reused,
+            "TX Reused": tx_reused,
+            "Missing Proof": missing_chain_proof,
+            "Replay Verification": status,
+        })
+
+    replay_df = pd.DataFrame(replay_rows).sort_values("Dispute ID")
+
+    status_counts = replay_df["Replay Verification"].value_counts()
+    status_chart_df = pd.DataFrame(
+        {
+            "Status": status_counts.index,
+            "Count": status_counts.values,
+        }
+    )
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.subheader("Verification Outcome")
+        st.bar_chart(status_chart_df.set_index("Status"))
+
+    with col_right:
+        flagged_count = int((replay_df["Replay Verification"] == "Flagged").sum())
+        pass_count = int((replay_df["Replay Verification"] == "Pass").sum())
+        st.metric("Replay Flags", flagged_count)
+        st.metric("Replay Passes", pass_count)
+
+    st.subheader("Per-Dispute Replay Check")
+    st.dataframe(replay_df, use_container_width=True)
+
+else:
+    st.info("No finalized disputes available for replay verification.")
